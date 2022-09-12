@@ -38,7 +38,7 @@ namespace BlazorQueue.ServiceInterface
         private readonly List<BlazorInstanceFacade> blazorInstances;
         private readonly List<BlazorTag> childTags;
         public ConcurrentDictionary<string, CancellationTokenSource> LockTokens { get; set; } = new();
-        public ConcurrentDictionary<string, ConcurrentDictionary<int,CancellationTokenSource>> LockPools { get; set; } = new();
+        public ConcurrentDictionary<string, (int max,ConcurrentDictionary<int,CancellationTokenSource> intPool)> LockPools { get; set; } = new();
         public BlazorInstanceFacade Parent => parent;
 
         /// <summary>
@@ -110,6 +110,11 @@ namespace BlazorQueue.ServiceInterface
                 return added;
             }
         }
+
+        public void SetupDbPool()
+        {
+            LockPools.TryAdd("Db", (5, new ConcurrentDictionary<int, CancellationTokenSource>()));
+        }
         /// <summary>
         /// Attempts to get a 5 minute max db connection
         /// </summary>
@@ -129,9 +134,8 @@ namespace BlazorQueue.ServiceInterface
             {
                 
                 CancellationTokenSource item = new();
-                //todo: check pool max
-                int idnex = pool.Count;
-                if (pool.TryAdd(idnex, item))
+                int idnex = pool.intPool.Count;
+                if (pool.max < idnex  && pool.intPool.TryAdd(idnex, item))
                 {
                     if(time.Milliseconds > 0) 
                         item.CancelAfter(time);
@@ -148,7 +152,7 @@ namespace BlazorQueue.ServiceInterface
             {
                 return false; // no such queue
             }
-            if (LockPools.TryGetValue(name, out var pool) && pool.TryGetValue(index, out var tokensource))
+            if (LockPools.TryGetValue(name, out var pool) && pool.intPool.TryGetValue(index, out var tokensource))
             {
                 tokensource.Dispose();
                 return true;
