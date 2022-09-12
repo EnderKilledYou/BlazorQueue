@@ -126,7 +126,7 @@ Less our App's navigation menus which we'll dynamically generate with the splash
 
 ```js
 TOP = `
-    $0.40 /mo,        /docs/hosting
+ 
     Prerendering,     /docs/prerender
     Deployments,      /docs/deploy
 `

@@ -1,10 +1,7 @@
-﻿using Microsoft.AspNetCore.SignalR;
-using Microsoft.AspNetCore.SignalR.Client;
-using ServiceStack.Model;
+﻿using ServiceStack.Model;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Threading;
 using System.Threading.Tasks;
 
 
@@ -29,96 +26,68 @@ namespace BlazorQueue.ServiceInterface
 
         private readonly BlazorInstanceFacade parent;
         private readonly List<BlazorInstanceFacade> blazorInstances;
-  
 
+        public BlazorInstanceFacade Parent => parent;
+
+        /// <summary>
+        /// 
+        ///
+        /// </summary>
+        /// <param name="tag"></param>
+        /// <returns></returns>
+        public async Task<BlazorInstanceFacade> GetTopBlaztor(BlazorTag tag)
+        {
+
+
+            BlazorInstanceFacade instance = parent;
+            while (instance == null)
+            {
+                var tmp = await parent.GetParent();
+                if (tmp == null)
+                {
+                    break;
+                }
+                instance = await tmp.GetByTag(tag);
+            }
+            return instance;
+        }
+
+        /// <summary>
+        ///  Gets the blazor instance that has a queue and the first by order of amount in that queue desc.
+        ///  If it can't find the tag, it traverses upwards until it goes to top blazor.
+        /// 
+        /// </summary>
+        /// <param name="tag">Returns null if no tags are on this tree</param>
+        /// <returns></returns>
         public async Task<BlazorInstanceFacade> GetFreestBlazorInstance(BlazorTag tag)
         {
-            var instance = blazorInstances.Where(a => a.BlazorTags.Any(a => a.Name == tag.Name)).OrderBy(a=>a.GetTagQueueCount(tag).Count).FirstOrDefault();
+            var instance = blazorInstances.Where(a => a.BlazorTags.Any(a => a.Name == tag.Name)).OrderBy(a=>a.GetTagQueueCountSync(tag).Count).FirstOrDefault();
             if (instance != null)
             {
                 return instance;
             }
             
-            instance = await parent.GetByTagAsync(tag);
+            instance = await parent.GetByTag(tag);
             while (instance == null)
             {
-                var tmp = await parent.GetParentAsync();
+                var tmp = await parent.GetParent();
                 if(tmp == null)
                 {
                     break;
                 }
-                instance = await tmp.GetByTagAsync(tag);
+                instance = await tmp.GetByTag(tag);
             }
             return instance;
         }
 
+        public BlazorInstanceFacade GetParent()
+        {
+            return parent;
+        }
     }
     public interface IHasBlazorQueueGuid
     {
         public Guid Guid { get; set; }
-    }
-
-  
-   
-    public class BlazorInstanceFacade : HasBlazorQueueGuid, IAsyncDisposable
-    {
-        public List<BlazorTag> BlazorTags { get; init; } =  new();
-        public async Task<BlazorInstanceFacade> GetParentAsync( CancellationToken cancellationToken = default(CancellationToken))
-        {
-            return await connection.InvokeAsync<BlazorInstanceFacade>("GetParent", cancellationToken:cancellationToken);
-        }
-        public async Task<TagCount> GetTagQueueCountAsync(BlazorTag tag,CancellationToken cancellationToken = default(CancellationToken))
-        
-        {
-            return await connection.InvokeAsync<TagCount>("GetTagQueueCount",tag, cancellationToken: cancellationToken);
-            
-        }
-
-        private readonly HubConnection connection;
-
-
-
-        public async Task<BlazorInstanceFacade> GetByTagAsync(BlazorTag tag, CancellationToken cancellationToken = default(CancellationToken))
-        {
-            return await connection.InvokeAsync<BlazorInstanceFacade>("GetByTag", tag, cancellationToken: cancellationToken);
-        }
-        public BlazorInstanceFacade GetByTag(BlazorTag tag, CancellationToken cancellationToken)
-        {
-            using var result = GetByTagAsync(tag, cancellationToken);
-            result.Wait();
-            return result.Result;
-        }
-        public TagCount GetTagQueueCount(BlazorTag tag, CancellationToken cancellationToken = default(CancellationToken))
-        {
-            using var result = GetTagQueueCountAsync(tag, cancellationToken);
-            result.Wait();
-            return result.Result;
-        }
-        public BlazorInstanceFacade GetParent(CancellationToken cancellationToken = default(CancellationToken))
-        {
-            using var result = GetParentAsync(cancellationToken);
-            result.Wait();
-            return result.Result;
-        }
-
-        ValueTask IAsyncDisposable.DisposeAsync()
-        {
-            return connection.DisposeAsync();
-        }
-
-        public BlazorInstanceFacade(string HostUrl, string HubName, string token)
-        {
-            connection = new HubConnectionBuilder()
-                    .WithAutomaticReconnect(new[] { TimeSpan.Zero, TimeSpan.Zero, TimeSpan.FromSeconds(10) })
-                .WithUrl(new Uri(HostUrl + HubName), options =>
-                {
-                    options.Headers.Add("Authorization", "bearer " + token);
-                }).Build();
- 
-            
-
-            connection.StartAsync().Wait();
-        }
     }
     public class HubHelper
     {
