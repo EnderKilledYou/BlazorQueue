@@ -1,7 +1,9 @@
-﻿using Microsoft.AspNetCore.SignalR.Client;
+﻿using Microsoft.AspNetCore.SignalR;
+using Microsoft.AspNetCore.SignalR.Client;
 using ServiceStack.Model;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -12,34 +14,40 @@ namespace BlazorQueue.ServiceInterface
     {
         public string Name { get; set; }
     }
+    //the me instance
     public class BlazorInstance
     {
 
         //"https://localhost:7278/StreamHub"
 
-        public BlazorInstance(BlazorInstanceFacade blazorInstanceFacade, List<BlazorInstance> blazorInstances = null, List<BlazorTag> blazorTags = null)
+        public BlazorInstance(BlazorInstanceFacade blazorInstanceFacade, List<BlazorInstanceFacade> blazorInstances = null )
         {
             this.parent = blazorInstanceFacade;
             this.blazorInstances = blazorInstances ?? new();
-            this.blazorTags = blazorTags ?? new();
+           
         }
 
         private readonly BlazorInstanceFacade parent;
-        private readonly List<BlazorInstance> blazorInstances;
-        private readonly List<BlazorTag> blazorTags;
-
+        private readonly List<BlazorInstanceFacade> blazorInstances;
+  
 
         public async Task<BlazorInstanceFacade> GetFreestBlazorInstance(BlazorTag tag)
         {
-            var instance = await parent.GetByTag(tag);
+            var instance = blazorInstances.Where(a => a.BlazorTags.Any(a => a.Name == tag.Name)).OrderBy(a=>a.GetTagQueueCount(tag).Count).FirstOrDefault();
+            if (instance != null)
+            {
+                return instance;
+            }
+            
+            instance = await parent.GetByTagAsync(tag);
             while (instance == null)
             {
-                var tmp = await parent.GetParent();
+                var tmp = await parent.GetParentAsync();
                 if(tmp == null)
                 {
                     break;
                 }
-                instance = await tmp.GetByTag(tag);
+                instance = await tmp.GetByTagAsync(tag);
             }
             return instance;
         }
@@ -49,72 +57,49 @@ namespace BlazorQueue.ServiceInterface
     {
         public Guid Guid { get; set; }
     }
-    public class BlazorRPC<T,TRequest> where TRequest : IHasBlazorQueueGuid where T: IHasBlazorQueueGuid
-    {
 
-
-        private readonly HubConnection connection;
-        private T? value;
-        private string eventName;
-        private CancellationTokenSource cancellationTokenSource;
-        private readonly int timeOut;
-
-        public BlazorRPC(HubConnection connection, CancellationTokenSource cancellationTokenSource = null, int timeOut = -1)
-        {
-            this.connection = connection;
-            
-            this.cancellationTokenSource = cancellationTokenSource ?? new();
-            this.timeOut = timeOut;
-        }
-
-        public async Task Put(TRequest request)
-        {
-         
-            connection.On<T>(request.Guid.ToString(), (message) =>
-            {
-                value = message;
-                cancellationTokenSource.Cancel();
-            });
-            await connection.SendAsync(typeof(TRequest).FullName,request);
-        }
-        public async Task<T> Get()
-        {
-            try
-            {
- 
-                await Task.Delay(timeOut, cancellationTokenSource.Token);
-            }
-            catch
-            {
-
-            }
-            connection.Remove(value?.Guid.ToString());
-            return value;
-        }
-
-    }
+  
+   
     public class BlazorInstanceFacade : HasBlazorQueueGuid, IAsyncDisposable
     {
-
-        public async Task<BlazorInstanceFacade> GetParent()
+        public List<BlazorTag> BlazorTags { get; init; } =  new();
+        public async Task<BlazorInstanceFacade> GetParentAsync( CancellationToken cancellationToken = default(CancellationToken))
         {
-            var rpc =new  BlazorRPC<BlazorInstanceFacade, GetParentRequest>(connection,timeOut:10* 1000);
-            await rpc.Put(new GetParentRequest());
-            return await rpc.Get();
+            return await connection.InvokeAsync<BlazorInstanceFacade>("GetParent", cancellationToken:cancellationToken);
+        }
+        public async Task<TagCount> GetTagQueueCountAsync(BlazorTag tag,CancellationToken cancellationToken = default(CancellationToken))
+        
+        {
+            return await connection.InvokeAsync<TagCount>("GetTagQueueCount",tag, cancellationToken: cancellationToken);
+            
         }
 
         private readonly HubConnection connection;
 
 
 
-        public async Task<BlazorInstanceFacade> GetByTag(BlazorTag tag)
+        public async Task<BlazorInstanceFacade> GetByTagAsync(BlazorTag tag, CancellationToken cancellationToken = default(CancellationToken))
         {
-            var rpc = new BlazorRPC<BlazorInstanceFacade, GetByTagRequest>(connection, timeOut: 10 * 1000);
-            await rpc.Put(new GetByTagRequest(tag));
-            return await rpc.Get();
+            return await connection.InvokeAsync<BlazorInstanceFacade>("GetByTag", tag, cancellationToken: cancellationToken);
         }
-
- 
+        public BlazorInstanceFacade GetByTag(BlazorTag tag, CancellationToken cancellationToken)
+        {
+            using var result = GetByTagAsync(tag, cancellationToken);
+            result.Wait();
+            return result.Result;
+        }
+        public TagCount GetTagQueueCount(BlazorTag tag, CancellationToken cancellationToken = default(CancellationToken))
+        {
+            using var result = GetTagQueueCountAsync(tag, cancellationToken);
+            result.Wait();
+            return result.Result;
+        }
+        public BlazorInstanceFacade GetParent(CancellationToken cancellationToken = default(CancellationToken))
+        {
+            using var result = GetParentAsync(cancellationToken);
+            result.Wait();
+            return result.Result;
+        }
 
         ValueTask IAsyncDisposable.DisposeAsync()
         {
@@ -124,6 +109,7 @@ namespace BlazorQueue.ServiceInterface
         public BlazorInstanceFacade(string HostUrl, string HubName, string token)
         {
             connection = new HubConnectionBuilder()
+                    .WithAutomaticReconnect(new[] { TimeSpan.Zero, TimeSpan.Zero, TimeSpan.FromSeconds(10) })
                 .WithUrl(new Uri(HostUrl + HubName), options =>
                 {
                     options.Headers.Add("Authorization", "bearer " + token);
