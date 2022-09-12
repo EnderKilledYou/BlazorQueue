@@ -1,0 +1,10 @@
+{
+  "scripts": {
+    "ui:dev": "npx tailwindcss -c tailwind.config.js -i ./tailwind.input.css -o ./wwwroot/css/app.css --watch",
+    "ui:build": "npx tailwindcss -c tailwind.config.js -i ./tailwind.input.css -o ./wwwroot/css/app.css --minify",
+    "postinstall": "cd ../BlazorQueue && dotnet run --AppTasks=migrate",
+    "migrate": "cd ../BlazorQueue && dotnet run BlazorQueue.csproj --AppTasks=migrate",
+    "revert:last": "cd ../BlazorQueue && dotnet run --AppTasks=migrate.revert:last",
+    "revert:all": "cd ../BlazorQueue && dotnet run --AppTasks=migrate.revert:all"
+  }
+}
