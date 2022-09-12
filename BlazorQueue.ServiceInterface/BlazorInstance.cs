@@ -2,6 +2,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 
 
@@ -12,21 +13,30 @@ namespace BlazorQueue.ServiceInterface
         public string Name { get; set; }
     }
     //the me instance
+
+    
     public class BlazorInstance
     {
 
         //"https://localhost:7278/StreamHub"
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="parent">The parent hub of this</param>
+        /// <param name="blazorInstances">If set, will set child tags if child tags is not set</param>
+        /// <param name="childTags">Either the flattened distinct list of instances or will be </param>
 
-        public BlazorInstance(BlazorInstanceFacade blazorInstanceFacade, List<BlazorInstanceFacade> blazorInstances = null, List<BlazorTag> childTags = null)
+        public BlazorInstance(BlazorInstanceFacade parent, List<BlazorInstanceFacade> blazorInstances = null, List<BlazorTag> childTags = null)
         {
-            this.parent = blazorInstanceFacade;
+            this.parent = parent;
             this.blazorInstances = blazorInstances ?? new();
-            this.childTags = childTags ??new();
+            this.childTags = childTags ?? blazorInstances.SelectMany(a=>a.BlazorTags).GroupBy(a=>a.Name).Select(a=>a.First()).ToList();
         }
 
         private readonly BlazorInstanceFacade parent;
         private readonly List<BlazorInstanceFacade> blazorInstances;
         private readonly List<BlazorTag> childTags;
+        public Dictionary<string, CancellationTokenSource> LockTokens { get; set; } = new();
 
         public BlazorInstanceFacade Parent => parent;
 
@@ -41,16 +51,28 @@ namespace BlazorQueue.ServiceInterface
 
 
             BlazorInstanceFacade instance = parent;
-            while (instance == null)
+            BlazorInstanceFacade tmp = parent;
+            while (tmp != null)
             {
-                var tmp = await parent.GetParent();
+                instance = tmp;
+                tmp = await tmp.GetParent();
                 if (tmp == null)
                 {
                     break;
-                }
-                instance = await tmp.GetByTag(tag);
+                }            
             }
             return instance;
+        }
+        /// <summary>
+        ///  Create a lock around a named resource for anyone who has this one who is accessing this facade. 
+        /// 
+        /// </summary>
+        /// <param name="name">Lock Name</param>
+        /// <param name="time">time out to auto release incase of system failure.</param>
+        /// <returns></returns>
+        public async Task LockResource(string name, TimeSpan time)
+        {
+
         }
 
         /// <summary>
@@ -71,9 +93,10 @@ namespace BlazorQueue.ServiceInterface
             }
             
             instance = await parent.GetByTag(tag);
+            var tmp = instance;
             while (instance == null)
             {
-                var tmp = await parent.GetParent();
+                tmp = await tmp.GetParent();
                 if(tmp == null)
                 {
                     break;
