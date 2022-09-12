@@ -38,7 +38,7 @@ namespace BlazorQueue.ServiceInterface
         private readonly List<BlazorInstanceFacade> blazorInstances;
         private readonly List<BlazorTag> childTags;
         public ConcurrentDictionary<string, CancellationTokenSource> LockTokens { get; set; } = new();
-
+        public ConcurrentDictionary<string, ConcurrentDictionary<int,CancellationTokenSource>> LockPools { get; set; } = new();
         public BlazorInstanceFacade Parent => parent;
 
         /// <summary>
@@ -110,7 +110,52 @@ namespace BlazorQueue.ServiceInterface
                 return added;
             }
         }
+        /// <summary>
+        /// Attempts to get a 5 minute max db connection
+        /// </summary>
+        /// <returns></returns>
+        public int LockDbPool()
+        {
+            return LockPool("Db", new TimeSpan(0, 5, 0));
+        }
+ 
+        public int LockPool(string name,TimeSpan time= default)
+        {
+            if (!LockPools.ContainsKey(name)) 
+            {
+                return -2; // no such queue
+            }
+            if(LockPools.TryGetValue(name,out var pool))
+            {
+                
+                CancellationTokenSource item = new();
+                //todo: check pool max
+                int idnex = pool.Count;
+                if (pool.TryAdd(idnex, item))
+                {
+                    if(time.Milliseconds > 0) 
+                        item.CancelAfter(time);
+                    return idnex;
+                }
+                
+            }
+            return -1;
+        }
 
+        public bool UnlockPool(string name,int index)
+        {
+            if (!LockPools.ContainsKey(name))
+            {
+                return false; // no such queue
+            }
+            if (LockPools.TryGetValue(name, out var pool) && pool.TryGetValue(index, out var tokensource))
+            {
+                tokensource.Dispose();
+                return true;
+            }
+            return false;
+            
+        }
         /// <summary>
         ///  Do we at this time have this lock
         /// 
