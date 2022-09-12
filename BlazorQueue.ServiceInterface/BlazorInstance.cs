@@ -1,5 +1,6 @@
 ﻿using ServiceStack.Model;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -36,7 +37,7 @@ namespace BlazorQueue.ServiceInterface
         private readonly BlazorInstanceFacade parent;
         private readonly List<BlazorInstanceFacade> blazorInstances;
         private readonly List<BlazorTag> childTags;
-        public Dictionary<string, CancellationTokenSource> LockTokens { get; set; } = new();
+        public ConcurrentDictionary<string, CancellationTokenSource> LockTokens { get; set; } = new();
 
         public BlazorInstanceFacade Parent => parent;
 
@@ -70,11 +71,68 @@ namespace BlazorQueue.ServiceInterface
         /// <param name="name">Lock Name</param>
         /// <param name="time">time out to auto release incase of system failure.</param>
         /// <returns></returns>
-        public async Task LockResource(string name, TimeSpan time)
+        public bool LockResource(string name, TimeSpan time = default)
         {
+            if(LockTokens.TryGetValue(name,out var token))
+            {
+              
+                if (!token.IsCancellationRequested )
+                {
+                    return false;
+                }
 
+                CancellationTokenSource cancellationTokenSource = new();
+                var updated = LockTokens.TryUpdate(name, cancellationTokenSource,token);
+                if (updated)
+                {
+                    token.Dispose();
+                    if (time != default)
+                    {
+                        cancellationTokenSource.CancelAfter(time);
+                    }
+                }
+                return updated;
+
+
+            }
+            else
+            {
+
+                CancellationTokenSource cancellationTokenSource = new();
+                var added = LockTokens.TryAdd(name, cancellationTokenSource);
+                if (added)
+                {
+                    if (time != default)
+                    {
+                        cancellationTokenSource.CancelAfter(time);
+                    }
+                }
+                return added;
+            }
         }
 
+        /// <summary>
+        ///  Do we at this time have this lock
+        /// 
+        /// </summary>
+        /// <param name="name">Lock Name</param>
+ 
+        /// <returns> </returns>
+        public bool ContainsLock(string name)
+        {
+            return LockTokens.ContainsKey(name) ;
+        }
+
+        /// <summary>
+        ///  unlock a named resource if it exists.
+        /// 
+        /// </summary>
+        /// <param name="name">Lock Name</param> 
+        /// <returns>true if it unlocked it. false if it didn't exist or it didn't unlock it (soem other thred did)</returns>
+        public bool UnLockResource(string name)
+        {
+            return LockTokens.ContainsKey(name) && LockTokens.TryRemove(name, out _);
+        }
         /// <summary>
         ///  Gets the blazor instance that has a queue and the first by order of amount in that queue desc.
         ///  If it can't find the tag, it traverses upwards until it goes to top blazor.
