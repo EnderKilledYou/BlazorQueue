@@ -17,15 +17,16 @@ namespace BlazorQueue.ServiceInterface
 
         //"https://localhost:7278/StreamHub"
 
-        public BlazorInstance(BlazorInstanceFacade blazorInstanceFacade, List<BlazorInstanceFacade> blazorInstances = null )
+        public BlazorInstance(BlazorInstanceFacade blazorInstanceFacade, List<BlazorInstanceFacade> blazorInstances = null, List<BlazorTag> childTags = null)
         {
             this.parent = blazorInstanceFacade;
             this.blazorInstances = blazorInstances ?? new();
-           
+            this.childTags = childTags ??new();
         }
 
         private readonly BlazorInstanceFacade parent;
         private readonly List<BlazorInstanceFacade> blazorInstances;
+        private readonly List<BlazorTag> childTags;
 
         public BlazorInstanceFacade Parent => parent;
 
@@ -61,6 +62,8 @@ namespace BlazorQueue.ServiceInterface
         /// <returns></returns>
         public async Task<BlazorInstanceFacade> GetFreestBlazorInstance(BlazorTag tag)
         {
+            if (!childTags.All(a => a.Name != tag.Name)) return null; //short cut search
+
             var instance = blazorInstances.Where(a => a.BlazorTags.Any(a => a.Name == tag.Name)).OrderBy(a=>a.GetTagQueueCountSync(tag).Count).FirstOrDefault();
             if (instance != null)
             {
