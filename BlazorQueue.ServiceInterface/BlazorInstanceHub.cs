@@ -1,32 +1,50 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using Microsoft.AspNet.SignalR.Client;
+using Microsoft.AspNetCore.SignalR;
+using ServiceStack;
+using ServiceStack.Host;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 
 
 namespace BlazorQueue.ServiceInterface
 {
-    public class BlazorInstanceHub : Hub, IAmABlazor
+    public class BlazorInstanceHub : ServiceGatewayHub
     {
-        private readonly BlazorInstance me;
+        public BlazorInstanceHub(IServiceGatewayAsync serviceGatewayAsync) : base(serviceGatewayAsync)
+        {
+        }
+    }
+    public class ServiceGatewayHub : Hub
+    {
+        private IServiceGatewayAsync serviceGatewayAsync;
 
-        public BlazorInstanceHub(BlazorInstance me)
+        public ServiceGatewayHub(IServiceGatewayAsync serviceGatewayAsync)
         {
-            this.me = me;
+            this.serviceGatewayAsync = serviceGatewayAsync;
+
         }
 
-        public async Task<BlazorInstanceFacade> GetParent(CancellationToken cancellationToken = default)
+        public async Task<TResponse> SendAsync<TResponse>(IReturn<TResponse> requestDto)
         {
-            return me.GetParent();
+            return await serviceGatewayAsync.SendAsync<TResponse>(requestDto);
         }
-        public async Task<BlazorInstanceFacade> GetByTag(BlazorTag tag, CancellationToken cancellationToken = default)
+
+        public async Task<List<TResponse>> SendAllAsync<TResponse>(IEnumerable<IReturn<TResponse>> requestDtos)
         {
-            return await me.GetFreestBlazorInstance(tag);
+
+            return await serviceGatewayAsync.SendAllAsync<TResponse>(requestDtos);
         }
-        public async Task<TagCount> GetTagQueueCount(BlazorTag tag, CancellationToken cancellationToken = default)
+
+        public async Task PublishAsync(object requestDto)
         {
-            
-            return null;
-            //return await me.GetTagQueueCount(tag);
+            await serviceGatewayAsync.PublishAsync(requestDto);
         }
+
+        public async Task PublishAllAsync(IEnumerable<object> requestDtos)
+        {
+            await serviceGatewayAsync.PublishAllAsync(requestDtos);
+        }
+
     }
 }

@@ -1,6 +1,6 @@
-﻿using ServiceStack.Model;
+﻿using Newtonsoft.Json.Serialization;
+using ServiceStack.Model;
 using System;
-using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -9,14 +9,11 @@ using System.Threading.Tasks;
 
 namespace BlazorQueue.ServiceInterface
 {
-    public class BlazorTag
-    {
-        public string Name { get; set; }
-    }
+
     //the me instance
 
-    
-    public class BlazorInstance
+
+    public class BlazorInstance : IAmABlazor, IHaveBlazorTags
     {
 
         //"https://localhost:7278/StreamHub"
@@ -27,18 +24,21 @@ namespace BlazorQueue.ServiceInterface
         /// <param name="blazorInstances">If set, will set child tags if child tags is not set</param>
         /// <param name="childTags">Either the flattened distinct list of instances or will be </param>
 
-        public BlazorInstance(BlazorInstanceFacade parent, List<BlazorInstanceFacade> blazorInstances = null, List<BlazorTag> childTags = null)
+        public BlazorInstance(BlazorInstanceFacade parent,LockManager lockManager)
         {
             this.parent = parent;
-            this.blazorInstances = blazorInstances ?? new();
-            this.childTags = childTags ?? blazorInstances.SelectMany(a=>a.BlazorTags).GroupBy(a=>a.Name).Select(a=>a.First()).ToList();
+            this.lockManager = lockManager;
+            this.blazorInstances = new();
+            this.childTags = new();
+            this.tags = new();
         }
-
+        private readonly List<object> taskQueue;
         private readonly BlazorInstanceFacade parent;
+        private readonly LockManager lockManager;
         private readonly List<BlazorInstanceFacade> blazorInstances;
         private readonly List<BlazorTag> childTags;
-        public ConcurrentDictionary<string, CancellationTokenSource> LockTokens { get; set; } = new();
-        public ConcurrentDictionary<string, (int max,ConcurrentDictionary<int,CancellationTokenSource> intPool)> LockPools { get; set; } = new();
+        private readonly List<BlazorTag> tags;
+ 
         public BlazorInstanceFacade Parent => parent;
 
         /// <summary>
@@ -64,124 +64,7 @@ namespace BlazorQueue.ServiceInterface
             }
             return instance;
         }
-        /// <summary>
-        ///  Create a lock around a named resource for anyone who has this one who is accessing this facade. 
-        /// 
-        /// </summary>
-        /// <param name="name">Lock Name</param>
-        /// <param name="time">time out to auto release incase of system failure.</param>
-        /// <returns></returns>
-        public bool LockResource(string name, TimeSpan time = default)
-        {
-            if(LockTokens.TryGetValue(name,out var token))
-            {
-              
-                if (!token.IsCancellationRequested )
-                {
-                    return false;
-                }
-
-                CancellationTokenSource cancellationTokenSource = new();
-                var updated = LockTokens.TryUpdate(name, cancellationTokenSource,token);
-                if (updated)
-                {
-                    token.Dispose();
-                    if (time != default)
-                    {
-                        cancellationTokenSource.CancelAfter(time);
-                    }
-                }
-                return updated;
-
-
-            }
-            else
-            {
-
-                CancellationTokenSource cancellationTokenSource = new();
-                var added = LockTokens.TryAdd(name, cancellationTokenSource);
-                if (added)
-                {
-                    if (time != default)
-                    {
-                        cancellationTokenSource.CancelAfter(time);
-                    }
-                }
-                return added;
-            }
-        }
-
-        public void SetupDbPool()
-        {
-            LockPools.TryAdd("Db", (5, new ConcurrentDictionary<int, CancellationTokenSource>()));
-        }
-        /// <summary>
-        /// Attempts to get a 5 minute max db connection
-        /// </summary>
-        /// <returns></returns>
-        public int LockDbPool()
-        {
-            return LockPool("Db", new TimeSpan(0, 5, 0));
-        }
- 
-        public int LockPool(string name,TimeSpan time= default)
-        {
-            if (!LockPools.ContainsKey(name)) 
-            {
-                return -2; // no such queue
-            }
-            if(LockPools.TryGetValue(name,out var pool))
-            {
-                
-                CancellationTokenSource item = new();
-                int idnex = pool.intPool.Count;
-                if (pool.max < idnex  && pool.intPool.TryAdd(idnex, item))
-                {
-                    if(time.Milliseconds > 0) 
-                        item.CancelAfter(time);
-                    return idnex;
-                }
-                
-            }
-            return -1;
-        }
-
-        public bool UnlockPool(string name,int index)
-        {
-            if (!LockPools.ContainsKey(name))
-            {
-                return false; // no such queue
-            }
-            if (LockPools.TryGetValue(name, out var pool) && pool.intPool.TryGetValue(index, out var tokensource))
-            {
-                tokensource.Dispose();
-                return true;
-            }
-            return false;
-            
-        }
-        /// <summary>
-        ///  Do we at this time have this lock
-        /// 
-        /// </summary>
-        /// <param name="name">Lock Name</param>
- 
-        /// <returns> </returns>
-        public bool ContainsLock(string name)
-        {
-            return LockTokens.ContainsKey(name) ;
-        }
-
-        /// <summary>
-        ///  unlock a named resource if it exists.
-        /// 
-        /// </summary>
-        /// <param name="name">Lock Name</param> 
-        /// <returns>true if it unlocked it. false if it didn't exist or it didn't unlock it (soem other thred did)</returns>
-        public bool UnLockResource(string name)
-        {
-            return LockTokens.ContainsKey(name) && LockTokens.TryRemove(name, out _);
-        }
+      
         /// <summary>
         ///  Gets the blazor instance that has a queue and the first by order of amount in that queue desc.
         ///  If it can't find the tag, it traverses upwards until it goes to top blazor.
@@ -193,7 +76,7 @@ namespace BlazorQueue.ServiceInterface
         {
             if (!childTags.All(a => a.Name != tag.Name)) return null; //short cut search
 
-            var instance = blazorInstances.Where(a => a.BlazorTags.Any(a => a.Name == tag.Name)).OrderBy(a=>a.GetTagQueueCountSync(tag).Count).FirstOrDefault();
+            var instance = blazorInstances.Where(a => a.BlazorTags.Contains(tag)).OrderBy(a=>a.GetTagQueueCountSync(tag).Count).FirstOrDefault();
             if (instance != null)
             {
                 return instance;
@@ -217,14 +100,44 @@ namespace BlazorQueue.ServiceInterface
         {
             return parent;
         }
-    }
-    public interface IHasBlazorQueueGuid
-    {
-        public Guid Guid { get; set; }
-    }
-    public class HubHelper
-    {
 
-  
+        public Task<BlazorInstanceFacade> GetParent(CancellationToken cancellationToken = default)
+        {
+            throw new NotImplementedException();
+        }
+
+        public async Task AddChild(BlazorInstanceFacade child, CancellationToken cancellationToken = default)
+        {
+            this.blazorInstances.Add(child);
+            var tags = await child.BlazorTags();
+            this.childTags.AddRange(tags.Where(item => !childTags.Contains(item)));
+            
+            //todo: add child tags 
+        }
+
+        public async Task<BlazorInstanceFacade> GetByTag(BlazorTag tag, CancellationToken cancellationToken = default)
+        {
+            
+            foreach(var blazorInstance in this.blazorInstances)
+            {
+                if ((await blazorInstance.BlazorTags()).Any(a => a.Equals(tag)))
+                {
+                    return blazorInstance;
+                }
+            }
+            return null;
+
+        }
+
+        public async Task<TagCount> GetTagQueueCount(BlazorTag tag, CancellationToken cancellationToken = default)
+        {
+            return new TagCount (){Count=  taskQueue.Count };
+        }
+
+        public async Task<List<BlazorTag>> BlazorTags(CancellationToken cancellationToken = default)
+        {
+            return tags;
+        }
     }
+    
 }

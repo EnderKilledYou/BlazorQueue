@@ -1,4 +1,5 @@
 ﻿using Microsoft.AspNetCore.SignalR.Client;
+using ServiceStack;
 using System;
 using System.Collections.Generic;
 using System.Text.Json.Serialization;
@@ -8,9 +9,15 @@ using System.Threading.Tasks;
 
 namespace BlazorQueue.ServiceInterface
 {
-    public class BlazorInstanceFacade : HasBlazorQueueGuid, IAsyncDisposable , IAmABlazor, IJsonOnDeserialized
+  
+    public class BlazorInstanceFacade : HasBlazorQueueGuid, IAsyncDisposable ,  IJsonOnDeserialized, IEquatable<BlazorInstanceFacade>, IServiceGatewayAsync, IConnectToHub
     {
-        public List<BlazorTag> BlazorTags { get; init; } =  new();
+
+       
+        public async Task<List<BlazorTag>> BlazorTags(CancellationToken cancellationToken = default)
+        {
+            return await connection.InvokeAsync<List<BlazorTag>>(nameof(BlazorTags), cancellationToken: cancellationToken);
+        }
         public string HostUrl { get; }
         public string HubName { get; }
         public string Token { get; }
@@ -18,38 +25,15 @@ namespace BlazorQueue.ServiceInterface
         private   HubConnection connection;
 
 
-
-        public async Task<BlazorInstanceFacade> GetByTag(BlazorTag tag, CancellationToken cancellationToken = default)
-        {
-            return await connection.InvokeAsync<BlazorInstanceFacade>("GetByTag", tag, cancellationToken: cancellationToken);
-        }
- 
-    
-        public async Task<BlazorInstanceFacade> GetParent(CancellationToken cancellationToken = default)
-        {
-            return await connection.InvokeAsync<BlazorInstanceFacade>("GetParent", cancellationToken: cancellationToken);
-
-        }
-
+         
         public ValueTask DisposeAsync()
         {
             var val = connection.DisposeAsync();
             GC.SuppressFinalize(this);
             return val;
         }
-
-        public   TagCount GetTagQueueCountSync(BlazorTag tag, CancellationToken cancellationToken = default)
-        {
-            var task = connection.InvokeAsync<TagCount>("GetTagQueueCount", tag, cancellationToken: cancellationToken);
-            task.Wait(cancellationToken);
-            return task.Result;
-        }
-
-        public async Task<TagCount> GetTagQueueCount(BlazorTag tag, CancellationToken cancellationToken = default)
-        {
-
-            return await connection.InvokeAsync<TagCount>("GetTagQueueCount", tag, cancellationToken: cancellationToken);
-        }
+ 
+         
 
         public BlazorInstanceFacade(string HostUrl, string HubName, string token)
         {
@@ -80,6 +64,52 @@ namespace BlazorQueue.ServiceInterface
         public void OnDeserialized()
         {
             Start().Wait();
+        }
+         
+        public override bool Equals(object obj)
+        {
+            return Equals(obj as BlazorInstanceFacade);
+        }
+
+        public bool Equals(BlazorInstanceFacade other)
+        {
+            return other is not null &&
+                   Guid.Equals(other.Guid);
+        }
+
+        public static bool operator ==(BlazorInstanceFacade left, BlazorInstanceFacade right)
+        {
+            return EqualityComparer<BlazorInstanceFacade>.Default.Equals(left, right);
+        }
+
+        public static bool operator !=(BlazorInstanceFacade left, BlazorInstanceFacade right)
+        {
+            return !(left == right);
+        }
+
+        public override int GetHashCode()
+        {
+            return Guid.GetHashCode();
+        }
+
+        public async Task<TResponse> SendAsync<TResponse>(object requestDto, CancellationToken token = default)
+        {
+            return await connection.InvokeAsync<TResponse>("SendAsync",requestDto, token);
+        }
+
+        public async Task<List<TResponse>> SendAllAsync<TResponse>(IEnumerable<object> requestDtos, CancellationToken token = default)
+        {
+            return await connection.InvokeAsync<List<TResponse>>("SendAllAsync", requestDtos, token);
+        }
+
+        public async Task PublishAsync(object requestDto, CancellationToken token = default)
+        {
+            await connection.SendAsync("PublishAsync", requestDto, token);
+        }
+
+        public async Task PublishAllAsync(IEnumerable<object> requestDtos, CancellationToken token = default)
+        {
+            await connection.SendAsync("PublishAllAsync", requestDtos, token);
         }
     }
 }

@@ -1,6 +1,6 @@
 ﻿namespace BlazorQueue.ServiceInterface
 {
-    public class TagCount :HasBlazorQueueGuid
+    public class TagCount 
     {
         public int Count { get; set; }
     }

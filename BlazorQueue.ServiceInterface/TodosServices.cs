@@ -1,43 +1,22 @@
-using System;
-using System.Linq;
-using ServiceStack;
 using BlazorQueue.ServiceModel;
+using ServiceStack;
 
 namespace BlazorQueue.ServiceInterface;
 
-public class TodosServices : Service
+public class BlazorInstanceService : Service
 {
-    public IAutoQueryData AutoQuery { get; set; }
+    private BlazorInstance BlazorInstance;
 
-    static readonly PocoDataSource<Todo> Todos = PocoDataSource.Create(new Todo[]
+    public BlazorInstanceService(BlazorInstance blazorInstance)
     {
-        new () { Id = 1, Text = "Learn" },
-        new () { Id = 2, Text = "Blazor", IsFinished = true },
-        new () { Id = 3, Text = "WASM!" },
-    }, nextId: x => x.Select(e => e.Id).Max());
-
-    public object Get(QueryTodos query)
-    {
-        var db = Todos.ToDataSource(query, Request);
-        return AutoQuery.Execute(query, AutoQuery.CreateQuery(query, Request, db), db);
+        BlazorInstance = blazorInstance;
     }
 
-    public Todo Post(CreateTodo request)
+    public object Any(WhoParentRequest request)
     {
-        var newTodo = new Todo { Id = Todos.NextId(), Text = request.Text };
-        Todos.Add(newTodo);
-        return newTodo;
+        return new WhoParentResponse()
+        {
+            Parent = (IConnectToHub)BlazorInstance.Parent
+        };
     }
-
-    public Todo Put(UpdateTodo request)
-    {
-        var todo = request.ConvertTo<Todo>();
-        Todos.TryUpdateById(todo, todo.Id);
-        return todo;
-    }
-
-    // Handles Deleting the Todo item
-    public void Delete(DeleteTodo request) => Todos.TryDeleteById(request.Id);
-
-    public void Delete(DeleteTodos request) => Todos.TryDeleteByIds(request.Ids);
 }
